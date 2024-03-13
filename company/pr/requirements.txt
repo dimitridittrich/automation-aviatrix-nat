@@ -1,0 +1,8 @@
+azure-common
+azure-core
+azure-identity
+azure-mgmt-resource
+azure-mgmt-subscription
+JSON-log-formatter
+PyYAML
+requests

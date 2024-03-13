@@ -1,0 +1,5 @@
+- ip: "10.10.88.6"
+  port: "3389"
+  protocol: "tcp"
+  reason: "Acesso para Administracao"
+  resource_name: "xxxxxxxxxxxxxxxxx-prd-brs-vm-win-01"

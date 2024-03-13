@@ -1,0 +1,8 @@
+squad:
+  name: "squadname"
+dev_owner:
+  name: "team-name"
+  email: "teamname@company.com.br"
+tech_owner:
+  name: "team-name"
+  email: "teamname@company.com.br"

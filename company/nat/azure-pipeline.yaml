@@ -1,0 +1,22 @@
+parameters:
+  - name: TG_COMMAND
+    displayName: Command to run Terragrunt
+    type: string
+    default: apply
+  - name: AGENT_POOL
+    displayName: Azure Devops Agent to run pipeline
+    type: string
+    values:
+      - company-dev-scus-azagent-2
+  - name: TG_PATH
+    displayName: Path to run Terragrunt
+    type: string
+    values:
+      - landigzones/subscriptionname
+stages:
+  - template: ./steps/stage.yaml
+    parameters:
+      AGENT_POOL: ${{ parameters.AGENT_POOL }}
+      TG_COMMAND: ${{ parameters.TG_COMMAND }}
+      TG_PATH: ${{ parameters.TG_PATH }}
+trigger: none

@@ -1,0 +1,95 @@
+trigger: none
+stages:
+  - stage: TERRAGRUNT_PR_VALIDATOR
+    displayName: "Validating Terragrunt..."
+    jobs:
+      - job: TERRAGRUNT_PR_VALIDATOR
+        displayName: "Validating Terragrunt PR validator"
+        steps:
+          - checkout: self
+            persistCredentials: true
+          - task: AzureKeyVault@1
+            displayName: "Fetching Shared KeyVault Secrets "
+            inputs:
+              azureSubscription: company-platform-xxx-management
+              keyVaultName: xxxxxxxxxxx-kv
+              secretsFilter: "*"
+              runAsPreJob: false
+          - task: Bash@3
+            displayName: "Config HTTP PAT Git URL over HTTPS"
+            inputs:
+              targetType: "inline"
+              script: git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf https://company-SA@dev.azure.com/company-SA
+            env:
+              AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+          - task: AzureCLI@2
+            displayName: Running Validator
+            inputs:
+              azureSubscription: company-platform-xxx-management
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                wget https://github.com/mikefarah/yq/releases/download/v4.16.1/yq_linux_amd64.tar.gz  -O - |  tar xz && sudo mv yq_linux_amd64 /usr/bin/yq
+                git config --global user.name "pull-request-validator"
+                git config --global user.email "pull-request-validator"
+                pip install -r .company/pr/requirements.txt
+                echo "[]" > subnets.json 
+                echo "[]" > pvt_zones.json
+                cd .company/pr 
+                python validator.py
+
+                export AZURE_TENANT_ID=${CON_AZURE_TENANT_ID}
+                export AZURE_CLIENT_SECRET=${CON_AZURE_CLIENT_KEY}
+                export AZURE_CLIENT_ID=${CON_AZURE_CLIENT_ID}
+                python validator.py
+
+                cd ../../
+                TG_PIPE_PATHS=()
+                yq -i  e '(.parameters | .[] | select(.name == "TG_PATH")).values |= []' .company/nat/azure-pipeline.yaml
+                HCL_DIRS=$(find -iname terragrunt.hcl ! -path ./terragrunt.hcl ! -path ./*.terragrunt-cache* |  sed  's/\/terragrunt\.hcl//g'  |  sed  's/\.\///g' )
+                WHERE_IM_START=$(pwd)
+                echo "Adding Terragrunt paths ..."
+                PATHS=()
+                for value in $HCL_DIRS
+                do  
+                    TG_PATH=$value
+                    cd $TG_PATH
+                    WHERE_IM_NOW=$(pwd)
+                    REMOVE_STRING=${WHERE_IM_NOW//$TG_PATH/}
+                    while [ "$WHERE_IM_NOW" != "$WHERE_IM_START" ]; do
+                        WHERE_IM_NOW=$(pwd)
+                        CORRECT_PATH=${WHERE_IM_NOW//$REMOVE_STRING/}
+                        DIR_DEEP_LEVEL=$(echo ${CORRECT_PATH} | grep -o / | wc -l)
+                        if [ $DIR_DEEP_LEVEL -gt 0 ]; then
+                            if [ "$CORRECT_PATH" != "${WHERE_IM_START}" ]; then
+                                PATHS+=(${CORRECT_PATH})
+                            fi       
+                        fi
+                        cd ..
+                    done
+                    cd $WHERE_IM_START
+                done
+
+                TG_PIPE_PATHS_UNIQ=($(for path in "${PATHS[@]}"; do echo "${path}"; done | sort -u))
+
+                for path in "${TG_PIPE_PATHS_UNIQ[@]}"
+                do
+                    LINE=$path yq -i -P  e '(.parameters | .[] | select(.name == "TG_PATH")).values |= . +  [env(LINE)]' .company/nat/azure-pipeline.yaml
+                done
+
+                GIT_FILES=$(git status -s -uno | wc -l)
+
+                if [[ $GIT_FILES -gt 0 ]];then
+                  git add .company/nat/azure-pipeline.yaml pvt_zones.json subnets.json kvs.json
+                  git commit -m "add dynamic parameters" 
+                  git push -f origin HEAD:${BRANCH}
+                fi
+            env:
+              AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+              BRANCH: $(System.PullRequest.SourceBranch)
+              AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+              AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+              AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxxxxxxxx
+              CON_AZURE_TENANT_ID: "xxxxxxxxxxxxxxxxxxxxxxxxx"
+              CON_AZURE_CLIENT_ID: $(CON-ARM-CLIENT-ID)
+              CON_AZURE_CLIENT_KEY: $(CON-ARM-SECRET-KEY)

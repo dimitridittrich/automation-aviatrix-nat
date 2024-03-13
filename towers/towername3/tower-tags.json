@@ -1,0 +1,11 @@
+{
+    "tech_owner_name": "full-name",
+    "tech_owner_email": "full.name@company.com.br",
+    "tech_owner_cell_number": "99999-9999",
+    "tech_lead_name": "full-name",
+    "tech_lead_email": "full.name@company.com.br",
+    "tech_lead_cell_number": "99999-9999",
+    "sre_name": "full-name",
+    "sre_email": "full.name@company.com.br",
+    "sre_cell_number": "99999-9999"
+}

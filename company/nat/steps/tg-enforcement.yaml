@@ -1,0 +1,95 @@
+parameters:
+- name: TG_HCL_PATH
+  default: ''
+steps:
+- task: AzureCLI@2
+  displayName: 'Enforcing Terragrunt and Terraform'
+  inputs:
+    azureSubscription: company-platform-xxx-management
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      az config set extension.use_dynamic_install=yes_without_prompt
+      function edit_hcl () {
+      TG_HCL_PATH="${1}"
+      TG_HCL_DIR=$(echo $TG_HCL_PATH | sed 's/\/terragrunt\.hcl//g' | sed 's/\.\///' )
+      export TZ=America/Sao_Paulo
+      DATE_TZ=$(date '+%Y%m%d%H%M%S')
+      
+      echo "Enforcing: $TG_HCL_PATH... ===================================================================================="
+      if [ -z "$(hcledit block get terraform.before_hook.generate_plan_path -f ${TG_HCL_PATH})" ];then
+          echo "Appending block terraform.before_hook.generate_plan_path..."
+          hcledit block append terraform before_hook.generate_plan_path -u -f "${TG_HCL_PATH}"
+      else
+          echo "block already exists: terraform.before_hook.generate_plan_path"
+      fi
+
+      if [ -z "$(hcledit block get terraform.extra_arguments.apply_args -f ${TG_HCL_PATH})" ];then
+          echo "Appending block terraform.extra_arguments.apply_args..."
+          hcledit block append terraform extra_arguments.apply_args -u -f "${TG_HCL_PATH}"
+      else
+          echo "block already exists: terraform.extra_arguments.apply_args"
+      fi
+
+      if [ -z "$(hcledit block get terraform.extra_arguments.plan_args -f ${TG_HCL_PATH})" ];then
+          echo "Appending block terraform.extra_arguments.plan_args..." 
+          hcledit block append terraform extra_arguments.plan_args -u -f "${TG_HCL_PATH}"
+      else
+          echo "block already exists: terraform.extra_arguments.plan_args"
+      fi
+      
+      PLAN_PATH_CMD=$(cat <<EOF
+      ["plan"]
+      EOF
+      )
+      echo "Appending attribute terraform.before_hook.generate_plan_path.commands..." && 
+      hcledit attribute append terraform.before_hook.generate_plan_path.commands "${PLAN_PATH_CMD}" -u -f "${TG_HCL_PATH}"
+  
+      PLAN_PATH_EXEC=$(cat <<EOF
+      ["mkdir", "-p", "\${get_parent_terragrunt_dir()}/plans/\${path_relative_to_include()}"]
+      EOF
+      )
+      echo "Appending attribute terraform.before_hook.generate_plan_path.execute..."  &&
+      hcledit attribute append terraform.before_hook.generate_plan_path.execute "${PLAN_PATH_EXEC}" -u -f  "${TG_HCL_PATH}"
+  
+      PLAN_EXTRA_ARGS_CMD=$(cat <<EOF
+      ["plan"]
+      EOF
+      )
+      echo "Appending attribute terraform.extra_arguments.plan_args.commands..." &&
+      hcledit attribute append terraform.extra_arguments.plan_args.commands "${PLAN_EXTRA_ARGS_CMD}" -u -f "${TG_HCL_PATH}"
+  
+      PLAN_EXTRA_ARGS_ARGS=$(cat <<EOF
+      [
+          "-out",
+          "\${get_parent_terragrunt_dir()}/plans/\${path_relative_to_include()}/plan.tfplan"
+      ]
+      EOF
+      )
+      echo "Appending attribute terraform.extra_arguments.plan_args.arguments..." &&
+      hcledit attribute append terraform.extra_arguments.plan_args.arguments "${PLAN_EXTRA_ARGS_ARGS}" -u -f "${TG_HCL_PATH}"
+  
+      APPLY_EXTRA_ARGS_CMD=$(cat <<EOF
+      ["apply"]
+      EOF
+      )
+      echo "Appending attribute terraform.extra_arguments.apply_args.commands..." &&
+      hcledit attribute append terraform.extra_arguments.apply_args.commands "${APPLY_EXTRA_ARGS_CMD}" -u -f "${TG_HCL_PATH}"
+  
+      APPLY_EXTRA_ARGS_ARGS=$(cat <<EOF
+      [ "\${get_parent_terragrunt_dir()}/plans/\${path_relative_to_include()}/plan.tfplan" ]
+      EOF
+      )
+      echo "Appending attribute terraform.extra_arguments.apply_args.arguments..." &&
+      hcledit attribute append terraform.extra_arguments.apply_args.arguments "${APPLY_EXTRA_ARGS_ARGS}" -u -f "${TG_HCL_PATH}"
+      }  
+
+      TG_HCL_FILES=$(find ${{ parameters.TG_HCL_PATH }} -iname terragrunt.hcl ! -path ./terragrunt.hcl ! -path ./*.terragrunt-cache*)
+
+  
+      for value in $TG_HCL_FILES
+      do
+          edit_hcl $value &&
+          echo "new HCL:" &&
+          cat $value
+      done

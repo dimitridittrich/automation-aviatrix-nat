@@ -1,0 +1,6 @@
+spoke:
+  name: "spoke-002"
+  alias: "02"
+
+subnet: nat
+gateway_name: subscriptionname-brs-stg-02

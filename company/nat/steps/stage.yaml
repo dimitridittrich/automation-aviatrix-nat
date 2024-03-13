@@ -1,0 +1,569 @@
+parameters:
+  - name: AGENT_POOL
+    displayName: Azure Devops Agent to run pipelineL
+    type: string
+  - name: TG_PATH
+    displayName: Path to run Terragrunt
+    type: string
+  - name: TG_COMMAND
+    displayName: Command to run Terragrunt
+    type: string
+
+stages:
+  - ${{ if ne(parameters['TG_COMMAND'], 'destroy') }}:
+    - ${{ if eq(parameters['TG_COMMAND'], 'apply') }}:
+        - stage: PLANNING_IAC
+          displayName: Planning TF Resources
+          jobs:
+            - deployment: PLANNING_IAC
+              environment: company-landigzoneS-NAT-PLAN
+              displayName: Planning infrastructure
+              pool: ${{ parameters.AGENT_POOL }}
+              strategy:
+                runOnce:
+                  deploy:
+                    steps:
+                      - checkout: self
+                        persistCredentials: true
+                      - task: AzureKeyVault@1
+                        displayName: "Fetching Shared KeyVault Secrets "
+                        inputs:
+                          azureSubscription: company-xxxxxxxxxxxxxx-xxx-management
+                          keyVaultName: xxxxxxxxxxxxxxxxxx-kv
+                          runAsPreJob: false
+                          secretsFilter: "*"
+                      - template: ./tg-enforcement.yaml
+                        parameters:
+                          TG_HCL_PATH: ${{ parameters.TG_PATH }}
+                      - task: Bash@3
+                        displayName: Config HTTP PAT Git URL over SSH
+                        inputs:
+                          targetType: inline
+                          script:
+                            git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA/TERRAFORM-MODULES/_git".insteadOf
+                            ssh://git@ssh.dev.azure.com/v3/company-SA/TERRAFORM-MODULES
+                        env:
+                          AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      - task: Bash@3
+                        displayName: Config HTTP PAT Git URL over HTTPS
+                        inputs:
+                          targetType: inline
+                          script:
+                            git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf
+                            https://company-SA@dev.azure.com/company-SA
+                        env:
+                          AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      - task: AzureCLI@2
+                        displayName: Planning TF
+                        inputs:
+                          azureSubscription: company-platform-xxx-management
+                          scriptType: bash
+                          scriptLocation: inlineScript
+                          inlineScript:
+                            "IS_TERRAGRUNT_STACK=$(find ${TERRAGRUNT_STACK_PATH}\
+                            \ -maxdepth 1 -name terragrunt.hcl -type f)\nif [ ${#IS_TERRAGRUNT_STACK}\
+                            \ -ge 1 ];then\n  cd ${TERRAGRUNT_STACK_PATH} && terragrunt plan \
+                            \ \nelse\n  cd ${TERRAGRUNT_STACK_PATH}  && terragrunt run-all plan \
+                            \ \nfi"
+                        env:
+                          ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                          ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                          ARM_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                          AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+                          AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                          AZURE_DEVOPS_EXT_PAT: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                          AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                          REPO_NAME: company-landigzones-nat
+                          TERRAGRUNT_STACK_PATH: ${{ parameters.TG_PATH }}
+                          TF_INPUT: false
+                          CON-ARM-CLIENT-ID: $(CON-ARM-CLIENT-ID)
+                          CON-ARM-SECRET-KEY: $(CON-ARM-SECRET-KEY)
+                          CON-ARM-SUBSCRIPTION-ID: $(CON-ARM-SUBSCRIPTION-ID)
+                          CON-ARM-TENANT-ID: $(CON-ARM-TENANT-ID)
+                          AZDO_ORG_SERVICE_URL: "https://dev.azure.com/company-SA"
+                          AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                          AVX_USERNAME: $(AVX-USERNAME)
+                          AVX_PASSWORD: $(AVX-PASSWORD)
+                          AVX_CONTROLLER_IP: $(AVX-CONTROLLER-IP)
+                      - task: PublishPipelineArtifact@1
+                        displayName: "Publish Plan to Artifact"
+                        inputs:
+                          artifactName: terraform
+                          targetPath: "plans/"
+  - ${{ if eq(parameters['TG_COMMAND'], 'apply') }}:
+      - stage: APPLYING_IAC
+        ${{ if ne(parameters['TG_COMMAND'], 'destroy') }}:
+          dependsOn: PLANNING_IAC
+        displayName: Applying TF Resources
+        jobs:
+          - deployment: APPLYING_IAC
+            displayName: Applying infrastructure
+            environment: company-landigzoneS-NAT-APPLY
+            pool: ${{ parameters.AGENT_POOL }}
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                      persistCredentials: true
+                    - task: DownloadPipelineArtifact@2
+                      displayName: "Get previous saved plan"
+                      inputs:
+                        artifactName: terraform
+                        path: "plans/"
+                    - task: AzureKeyVault@1
+                      displayName: "Fetching Shared KeyVault Secrets "
+                      inputs:
+                        azureSubscription: company-platform-xxx-management
+                        keyVaultName: xxxxxxxxxxxxxxx-kv
+                        runAsPreJob: false
+                        secretsFilter: "*"
+                    - template: ./tg-enforcement.yaml
+                      parameters:
+                        TG_HCL_PATH: ${{ parameters.TG_PATH }}
+                    - task: Bash@3
+                      displayName: Config HTTP PAT Git URL over SSH
+                      inputs:
+                        targetType: inline
+                        script:
+                          git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA/TERRAFORM-MODULES/_git".insteadOf
+                          ssh://git@ssh.dev.azure.com/v3/company-SA/TERRAFORM-MODULES
+                      env:
+                        AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                    - task: Bash@3
+                      displayName: Config HTTP PAT Git URL over HTTPS
+                      inputs:
+                        targetType: inline
+                        script:
+                          git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf
+                          https://company-SA@dev.azure.com/company-SA
+                      env:
+                        AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                    - task: AzureCLI@2
+                      displayName: Applying TF
+                      inputs:
+                        azureSubscription: company-platform-xxx-management
+                        scriptType: bash
+                        scriptLocation: inlineScript
+                        inlineScript:
+                          "IS_TERRAGRUNT_STACK=$(find ${TERRAGRUNT_STACK_PATH}\
+                          \ -maxdepth 1 -name terragrunt.hcl -type f)\nif [ ${#IS_TERRAGRUNT_STACK}\
+                          \ -ge 1 ];then\n cd ${TERRAGRUNT_STACK_PATH} && terragrunt apply\
+                          \ --terragrunt-log-level debug --terragrunt-debug\
+                          \ \nelse\n  cd ${TERRAGRUNT_STACK_PATH}  && terragrunt run-all apply\
+                          \ --terragrunt-log-level debug --terragrunt-debug\
+                          \ \nfi"
+                      env:
+                        ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                        ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                        ARM_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                        AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+                        AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                        AZURE_DEVOPS_EXT_PAT: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                        AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                        REPO_NAME: company-landigzones-nat
+                        TERRAGRUNT_STACK_PATH: ${{ parameters.TG_PATH }}
+                        TF_INPUT: false
+                        CON-ARM-CLIENT-ID: $(CON-ARM-CLIENT-ID)
+                        CON-ARM-SECRET-KEY: $(CON-ARM-SECRET-KEY)
+                        CON-ARM-SUBSCRIPTION-ID: $(CON-ARM-SUBSCRIPTION-ID)
+                        CON-ARM-TENANT-ID: $(CON-ARM-TENANT-ID)
+                        AZDO_ORG_SERVICE_URL: "https://dev.azure.com/company-SA"
+                        AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                        AVX_USERNAME: $(AVX-USERNAME)
+                        AVX_PASSWORD: $(AVX-PASSWORD)
+                        AVX_CONTROLLER_IP: $(AVX-CONTROLLER-IP)
+  - ${{ if eq(parameters['TG_COMMAND'], 'destroy') }}:
+    - stage: DESTROYING_IAC_DRY_RUN
+      displayName: Dry Run Destroying TF Resources
+      jobs:
+        - deployment: DESTROYING_IAC
+          displayName: Destroying Dry Run infrastructure
+          environment: company-landigzoneS-NAT-PLAN
+          pool: ${{ parameters.AGENT_POOL }}
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - checkout: self
+                    persistCredentials: true
+                  - task: AzureKeyVault@1
+                    displayName: "Fetching Shared KeyVault Secrets "
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      keyVaultName: xxxxxxxxxxxxx-kv
+                      runAsPreJob: false
+                      secretsFilter: "*"
+                  - template: ./tg-enforcement.yaml
+                    parameters:
+                      TG_HCL_PATH: ${{ parameters.TG_PATH }}
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over SSH
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA/TERRAFORM-MODULES/_git".insteadOf
+                        ssh://git@ssh.dev.azure.com/v3/company-SA/TERRAFORM-MODULES
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over HTTPS
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf
+                        https://company-SA@dev.azure.com/company-SA
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: AzureCLI@2
+                    displayName: Destroying TF Dry Run
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      scriptType: bash
+                      scriptLocation: inlineScript
+                      inlineScript: |-
+                        IS_TERRAGRUNT_STACK=$(find ${TERRAGRUNT_STACK_PATH} -maxdepth 1 -name terragrunt.hcl -type f)
+                        if [ ${TERRAGRUNT_STACK_PATH} != *"prd"* ];then 
+                            if [ ${#IS_TERRAGRUNT_STACK} -ge 1 ];then 
+                                cd ${TERRAGRUNT_STACK_PATH} && terragrunt plan -destroy
+                            else  
+                                cd ${TERRAGRUNT_STACK_PATH}  && terragrunt run-all plan -destroy
+                            fi
+                        else
+                            echo "Destroy PRD is not allowed yet."
+                        fi
+                    env:
+                      ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                      ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      ARM_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+                      AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      AZURE_DEVOPS_EXT_PAT: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      REPO_NAME: company-landigzones-nat
+                      TERRAGRUNT_STACK_PATH: ${{ parameters.TG_PATH }}
+                      TF_INPUT: false
+                      CON-ARM-CLIENT-ID: $(CON-ARM-CLIENT-ID)
+                      CON-ARM-SECRET-KEY: $(CON-ARM-SECRET-KEY)
+                      CON-ARM-SUBSCRIPTION-ID: $(CON-ARM-SUBSCRIPTION-ID)
+                      CON-ARM-TENANT-ID: $(CON-ARM-TENANT-ID)
+                      AZDO_ORG_SERVICE_URL: "https://dev.azure.com/company-SA"
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AVX_USERNAME: $(AVX-USERNAME)
+                      AVX_PASSWORD: $(AVX-PASSWORD)
+                      AVX_CONTROLLER_IP: $(AVX-CONTROLLER-IP)
+  - ${{ if eq(parameters['TG_COMMAND'], 'destroy') }}:
+    - stage: DESTROYING_IAC
+      displayName: Destroying TF Resources
+      jobs:
+        - deployment: DESTROYING_IAC
+          displayName: Destroying infrastructure
+          environment: company-landigzoneS-NAT-DESTROY
+          pool: ${{ parameters.AGENT_POOL }}
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - checkout: self
+                    persistCredentials: true
+                  - task: AzureKeyVault@1
+                    displayName: "Fetching Shared KeyVault Secrets "
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      keyVaultName: xxxxxxxxx-kv
+                      runAsPreJob: false
+                      secretsFilter: "*"
+                  - template: ./tg-enforcement.yaml
+                    parameters:
+                      TG_HCL_PATH: ${{ parameters.TG_PATH }}
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over SSH
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA/TERRAFORM-MODULES/_git".insteadOf
+                        ssh://git@ssh.dev.azure.com/v3/company-SA/TERRAFORM-MODULES
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over HTTPS
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf
+                        https://company-SA@dev.azure.com/company-SA
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: AzureCLI@2
+                    displayName: Destroying TF
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      scriptType: bash
+                      scriptLocation: inlineScript
+                      inlineScript: |-
+                        IS_TERRAGRUNT_STACK=$(find ${TERRAGRUNT_STACK_PATH} -maxdepth 1 -name terragrunt.hcl -type f)
+                        if [ ${TERRAGRUNT_STACK_PATH} != *"prd"* ];then 
+                            if [ ${#IS_TERRAGRUNT_STACK} -ge 1 ];then 
+                                cd ${TERRAGRUNT_STACK_PATH} && terragrunt destroy -auto-approve --terragrunt-log-level debug --terragrunt-debug
+                            else  
+                                cd ${TERRAGRUNT_STACK_PATH}  && terragrunt run-all destroy --terragrunt-log-level debug --terragrunt-debug
+                            fi
+                        else
+                            echo "Destroy PRD is not allowed yet."
+                        fi
+                    env:
+                      ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                      ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      ARM_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+                      AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      AZURE_DEVOPS_EXT_PAT: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      REPO_NAME: company-landigzones-nat
+                      TERRAGRUNT_STACK_PATH: ${{ parameters.TG_PATH }}
+                      TF_INPUT: false
+                      CON-ARM-CLIENT-ID: $(CON-ARM-CLIENT-ID)
+                      CON-ARM-SECRET-KEY: $(CON-ARM-SECRET-KEY)
+                      CON-ARM-SUBSCRIPTION-ID: $(CON-ARM-SUBSCRIPTION-ID)
+                      CON-ARM-TENANT-ID: $(CON-ARM-TENANT-ID)
+                      AZDO_ORG_SERVICE_URL: "https://dev.azure.com/company-SA"
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AVX_USERNAME: $(AVX-USERNAME)
+                      AVX_PASSWORD: $(AVX-PASSWORD)
+                      AVX_CONTROLLER_IP: $(AVX-CONTROLLER-IP)
+  - ${{ if contains(parameters['TG_COMMAND'], 'state') }}:
+    - stage: STATE_MANAGEMENT
+      displayName: Do you really want to state rm at ${{parameters.TG_PATH}} ?
+      jobs:
+        - deployment: TF_STATE_MANAGE_IAC
+          environment: company-landigzoneS-NAT-APPLY
+          pool: ${{ parameters.AGENT_POOL }}
+          displayName: State management
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - checkout: self
+                    persistCredentials: true
+                  - task: AzureKeyVault@1
+                    displayName: "Fetching Shared KeyVault Secrets "
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      keyVaultName: xxxxxxxxxx-kv
+                      runAsPreJob: false
+                      secretsFilter: "*"
+                  - template: ./tg-enforcement.yaml
+                    parameters:
+                      TG_HCL_PATH: ${{ parameters.TG_PATH }}
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over SSH
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA/TERRAFORM-MODULES/_git".insteadOf
+                        ssh://git@ssh.dev.azure.com/v3/company-SA/TERRAFORM-MODULES
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over HTTPS
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf
+                        https://company-SA@dev.azure.com/company-SA
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: AzureCLI@2
+                    displayName: Destroying TF
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      scriptType: bash
+                      scriptLocation: inlineScript
+                      inlineScript: |-
+                        IS_TERRAGRUNT_STACK=$(find ${TERRAGRUNT_STACK_PATH} -maxdepth 1 -name terragrunt.hcl -type f)
+                        if [ ${TERRAGRUNT_STACK_PATH} != *"prd"* ];then 
+                            if [ ${#IS_TERRAGRUNT_STACK} -ge 1 ];then 
+                                cd ${TERRAGRUNT_STACK_PATH} && echo ${TG_COMMAND} && terragrunt ${TG_COMMAND}
+                            else  
+                                echo "Not allowed"
+                            fi
+                        else
+                            echo "Destroy PRD is not allowed yet."
+                        fi
+                    env:
+                      ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                      ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      ARM_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+                      AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      AZURE_DEVOPS_EXT_PAT: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      REPO_NAME: company-landigzones-nat
+                      TERRAGRUNT_STACK_PATH: ${{ parameters.TG_PATH }}
+                      TF_INPUT: false
+                      TG_COMMAND: ${{ parameters['TG_COMMAND'] }}
+                      CON-ARM-CLIENT-ID: $(CON-ARM-CLIENT-ID)
+                      CON-ARM-SECRET-KEY: $(CON-ARM-SECRET-KEY)
+                      CON-ARM-SUBSCRIPTION-ID: $(CON-ARM-SUBSCRIPTION-ID)
+                      CON-ARM-TENANT-ID: $(CON-ARM-TENANT-ID)
+                      AZDO_ORG_SERVICE_URL: "https://dev.azure.com/company-SA"
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AVX_USERNAME: $(AVX-USERNAME)
+                      AVX_PASSWORD: $(AVX-PASSWORD)
+                      AVX_CONTROLLER_IP: $(AVX-CONTROLLER-IP)
+  - ${{ if contains(parameters['TG_COMMAND'], 'import') }}:
+    - stage: STATE_MANAGEMENT
+      displayName: Do you really want to import at ${{parameters.TG_PATH}} ?
+      jobs:
+        - deployment: TF_STATE_MANAGE_IAC
+          environment: company-landigzoneS-NAT-APPLY
+          pool: ${{ parameters.AGENT_POOL }}
+          displayName: Import management
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - checkout: self
+                    persistCredentials: true
+                  - task: AzureKeyVault@1
+                    displayName: "Fetching Shared KeyVault Secrets "
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      keyVaultName: xxxxxxxxxxxx-kv
+                      runAsPreJob: false
+                      secretsFilter: "*"
+                  - template: ./tg-enforcement.yaml
+                    parameters:
+                      TG_HCL_PATH: ${{ parameters.TG_PATH }}
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over SSH
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA/TERRAFORM-MODULES/_git".insteadOf
+                        ssh://git@ssh.dev.azure.com/v3/company-SA/TERRAFORM-MODULES
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over HTTPS
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf
+                        https://company-SA@dev.azure.com/company-SA
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: AzureCLI@2
+                    displayName: Importing TF
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      scriptType: bash
+                      scriptLocation: inlineScript
+                      inlineScript: |-
+                        IS_TERRAGRUNT_STACK=$(find ${TERRAGRUNT_STACK_PATH} -maxdepth 1 -name terragrunt.hcl -type f)
+                        if [ ${TERRAGRUNT_STACK_PATH} != *"prd"* ];then 
+                            if [ ${#IS_TERRAGRUNT_STACK} -ge 1 ];then 
+                                cd ${TERRAGRUNT_STACK_PATH} && echo ${TG_COMMAND} && terragrunt ${TG_COMMAND}
+                            else  
+                                echo "Not allowed"
+                            fi
+                        else
+                            echo "Import PRD is not allowed yet."
+                        fi
+                    env:
+                      ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                      ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      ARM_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+                      AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      AZURE_DEVOPS_EXT_PAT: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      REPO_NAME: company-landigzones-nat
+                      TERRAGRUNT_STACK_PATH: ${{ parameters.TG_PATH }}
+                      TF_INPUT: false
+                      TG_COMMAND: ${{ parameters['TG_COMMAND'] }}
+                      CON-ARM-CLIENT-ID: $(CON-ARM-CLIENT-ID)
+                      CON-ARM-SECRET-KEY: $(CON-ARM-SECRET-KEY)
+                      CON-ARM-SUBSCRIPTION-ID: $(CON-ARM-SUBSCRIPTION-ID)
+                      CON-ARM-TENANT-ID: $(CON-ARM-TENANT-ID)
+                      AZDO_ORG_SERVICE_URL: "https://dev.azure.com/company-SA"
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AVX_USERNAME: $(AVX-USERNAME)
+                      AVX_PASSWORD: $(AVX-PASSWORD)
+                      AVX_CONTROLLER_IP: $(AVX-CONTROLLER-IP)
+  - ${{ if contains(parameters['TG_COMMAND'], 'force-unlock') }}:
+    - stage: STATE_MANAGEMENT
+      displayName: Unlock state at  ${{parameters.TG_PATH}} ?
+      jobs:
+        - deployment: TF_STATE_MANAGE_IAC
+          environment: company-landigzoneS-NAT-APPLY
+          pool: ${{ parameters.AGENT_POOL }}
+          displayName: State management
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - checkout: self
+                    persistCredentials: true
+                  - task: AzureKeyVault@1
+                    displayName: "Fetching Shared KeyVault Secrets "
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      keyVaultName: xxxxxxxxxxxx-kv
+                      runAsPreJob: false
+                      secretsFilter: "*"
+                  - template: ./tg-enforcement.yaml
+                    parameters:
+                      TG_HCL_PATH: ${{ parameters.TG_PATH }}
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over SSH
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA/TERRAFORM-MODULES/_git".insteadOf
+                        ssh://git@ssh.dev.azure.com/v3/company-SA/TERRAFORM-MODULES
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: Bash@3
+                    displayName: Config HTTP PAT Git URL over HTTPS
+                    inputs:
+                      targetType: inline
+                      script:
+                        git config --global url."https://${AZDO_PERSONAL_ACCESS_TOKEN}@dev.azure.com/company-SA".insteadOf
+                        https://company-SA@dev.azure.com/company-SA
+                    env:
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                  - task: AzureCLI@2
+                    displayName: Removing State Lock
+                    inputs:
+                      azureSubscription: company-platform-xxx-management
+                      scriptType: bash
+                      scriptLocation: inlineScript
+                      inlineScript: |-
+                        IS_TERRAGRUNT_STACK=$(find ${TERRAGRUNT_STACK_PATH} -maxdepth 1 -name terragrunt.hcl -type f)
+                        if [ ${#IS_TERRAGRUNT_STACK} -ge 1 ];then 
+                            cd ${TERRAGRUNT_STACK_PATH} && terragrunt ${TG_COMMAND}
+                        else  
+                            echo "Not allowed"
+                        fi
+                    env:
+                      ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                      ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      ARM_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      AZURE_CLIENT_ID: $(ARM-CLIENT-ID)
+                      AZURE_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                      AZURE_DEVOPS_EXT_PAT: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AZURE_TENANT_ID: xxxxxxxxxxxxxxxxxxxx
+                      REPO_NAME: company-landigzones-nat
+                      TERRAGRUNT_STACK_PATH: ${{ parameters.TG_PATH }}
+                      TF_INPUT: false
+                      TG_COMMAND: ${{ parameters['TG_COMMAND'] }}
+                      CON-ARM-CLIENT-ID: $(CON-ARM-CLIENT-ID)
+                      CON-ARM-SECRET-KEY: $(CON-ARM-SECRET-KEY)
+                      CON-ARM-SUBSCRIPTION-ID: $(CON-ARM-SUBSCRIPTION-ID)
+                      CON-ARM-TENANT-ID: $(CON-ARM-TENANT-ID)
+                      AZDO_ORG_SERVICE_URL: "https://dev.azure.com/company-SA"
+                      AZDO_PERSONAL_ACCESS_TOKEN: $(AZDO-PERSONAL-ACCESS-TOKEN)
+                      AVX_USERNAME: $(AVX-USERNAME)
+                      AVX_PASSWORD: $(AVX-PASSWORD)
+                      AVX_CONTROLLER_IP: $(AVX-CONTROLLER-IP)

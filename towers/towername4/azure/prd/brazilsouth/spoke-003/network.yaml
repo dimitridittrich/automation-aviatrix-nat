@@ -1,0 +1,6 @@
+spoke:
+  name: "spoke-003"
+  alias: "03"
+
+subnet: nat
+gateway_name: subscriptionname-brs-prd-03
